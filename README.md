@@ -1,6 +1,9 @@
 # lyrical
 rust cli app that plays a song and shows its lyrics. purely for show
 
+## usage
+u can just double click the exe. it is pretty straightforward to use
+
 ## cmdline args
 ```
 -q/--query [keywords]
