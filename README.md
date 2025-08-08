@@ -6,6 +6,9 @@ u can just double click the exe. it is pretty straightforward to use
 
 ## cmdline args
 ```
+-d/--debug
+enables debug mode (adds extra info about the timing)
+
 -q/--query [keywords]
 searches for keywords in title, album and artist. ex: "2hollis poster boy" 
 conflicts with the --title arg 

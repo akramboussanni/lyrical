@@ -1,10 +1,12 @@
 use std::{io::{self, Write, stdout}, time::Duration};
+use std::time::Instant;
 use crossterm::{
     cursor, event::{poll, read, Event, KeyCode},
     execute, queue,
     style::{Color, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, enable_raw_mode, disable_raw_mode},
 };
+use crossterm::cursor::Show;
 use crossterm::event::KeyEventKind;
 use regex::Regex;
 use crate::{client::Response, PAGE_SIZE};
@@ -65,6 +67,8 @@ pub fn paginate(responses: &[Response]) -> io::Result<String> {
             writeln!(stdout)?;
             writeln!(stdout, "Page {}/{}", page_num + 1, max_pages)?;
             writeln!(stdout, "[↑/↓] Move  [←/→] Page  [Enter] Select  [Esc] Quit")?;
+            writeln!(stdout)?;
+            writeln!(stdout, "Lyrics provided by lrclib.net")?;
 
             stdout.flush()?;
             need_redraw = false;
@@ -118,33 +122,66 @@ pub fn paginate(responses: &[Response]) -> io::Result<String> {
         }
     }
 }
-
-pub fn show_lyrics(lyrics: String) -> io::Result<()> {
+pub fn show_lyrics(lyrics: String, debug: bool) -> io::Result<()> {
     let re = Regex::new(r"\[(\d{2}:\d{2}\.\d{2})]\s*(.+)").unwrap();
     let lines: Vec<&str> = lyrics.lines().collect();
 
     let mut stdout = stdout();
-    enable_raw_mode()?;
-    execute!(stdout, EnterAlternateScreen, cursor::Hide, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        cursor::Hide,
+        Clear(ClearType::All),
+        cursor::MoveTo(0, 0)
+    )?;
+
+    if let Some(first_caps) = lines.iter().filter_map(|l| re.captures(l)).next() {
+        let first_ts = parse_timestamp(first_caps.get(1).unwrap().as_str());
+        wait_or_interrupt(Duration::from_secs_f64(first_ts), &mut stdout)?;
+    }
+
+    let start = Instant::now();
 
     for i in 0..lines.len().saturating_sub(1) {
         if let (Some(caps), Some(next_caps)) = (re.captures(lines[i]), re.captures(lines[i + 1])) {
             let t0 = parse_timestamp(caps.get(1).unwrap().as_str());
             let t1 = parse_timestamp(next_caps.get(1).unwrap().as_str());
             let text = caps.get(2).unwrap().as_str();
-            let delay = ((t1 - t0) / text.chars().count() as f64 * 1000.0) as u64;
+
+            let char_count = text.chars().count().max(1);
+            let total_ms = ((t1 - t0) * 1000.0) as u64;
+            let delay = total_ms / char_count as u64;
+
+            if debug {
+                let elapsed = start.elapsed().as_secs_f64();
+                print!("[EXP {:.3}s] | [REAL {:.3}s] | [DLY {}ms] ", t0, elapsed, delay);
+            }
 
             for ch in text.chars() {
                 print!("{}", ch);
                 stdout.flush()?;
-                std::thread::sleep(Duration::from_millis(delay));
+                wait_or_interrupt(Duration::from_millis(delay), &mut stdout)?;
             }
             println!();
         }
     }
 
-    disable_raw_mode()?;
-    execute!(stdout, LeaveAlternateScreen, cursor::Show)?;
+    execute!(stdout, LeaveAlternateScreen, Show)?;
+    Ok(())
+}
+
+fn wait_or_interrupt(duration: Duration, stdout: &mut impl Write) -> io::Result<()> {
+    let start = Instant::now();
+    while start.elapsed() < duration {
+        if poll(Duration::from_millis(10))? {
+            if let Event::Key(key_event) = read()? {
+                if key_event.code == KeyCode::Char('c') {
+                    execute!(stdout, LeaveAlternateScreen, Show)?;
+                    return Ok(());
+                }
+            }
+        }
+    }
     Ok(())
 }
 
